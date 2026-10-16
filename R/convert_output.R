@@ -2046,11 +2046,11 @@ convert_output <- function(
     # "attempt to select less than one element in OneIndex".
     #
     # `sdrep` carries every derived time series, so without it the output holds
-    # only the input data. Say so rather than returning a table whose biomass
-    # and recruitment are simply absent.
+    # only the input data and the at-age quantities. Say so rather than
+    # returning a table whose biomass and recruitment are simply absent.
     if (!"sdrep" %in% names(dat)) {
       cli::cli_warn(c(
-        "Rceattle fit has no {.field sdrep}, so the converted output has no biomass, spawning biomass or recruitment.",
+        "Rceattle fit has no {.field sdrep}, so the converted output has no biomass, spawning biomass or recruitment time series.",
         i = "Refit with {.code fit_control(getsd = TRUE)} to standardize the derived time series."
       ))
     }
@@ -2157,6 +2157,9 @@ convert_output <- function(
 
         df4 <- rbind(df2, df3) |>
           dplyr::select(-n) |>
+          # log_index_hat has no years. Its sd is published on the
+          # index_predicted rows instead, which do.
+          dplyr::filter(label != "log_index_hat") |>
           dplyr::mutate(
             module_name = module_name
           )
@@ -2170,6 +2173,14 @@ convert_output <- function(
         data_list_list <- list()
 
         ####### Indices ####
+        # The sdreport's log_index_hat is log(index_hat) in index_data order, so
+        # its sd is the predicted index's own log-scale error.
+        log_index_hat_sd <- dat[["sdrep"]][["sd"]][
+          names(dat[["sdrep"]][["value"]]) == "log_index_hat"
+        ]
+        if (length(log_index_hat_sd) != nrow(extract[[1]]$index_data)) {
+          log_index_hat_sd <- NA_real_
+        }
         # Extract index_data
         df_index <- extract[[1]]$index_data |>
           # rename all columns to lower case to match standard
@@ -2182,9 +2193,14 @@ convert_output <- function(
           ) |>
           dplyr::mutate(
             # label = "index_observed",
-            uncertainty_label = "log_sd",
-            indices_predicted = dat$quantities$index_hat
+            # Rceattle's index and catch errors are log-scale sds.
+            uncertainty_label = "sd",
+            indices_predicted = dat$quantities$index_hat,
+            predicted_sd = log_index_hat_sd
           ) |>
+          # Rceattle predicts a row with a negative year but leaves it out of
+          # the likelihood. The standard cannot mark that, so the row is dropped.
+          dplyr::filter(year >= 0) |>
           # any_of(): `Q_block` is deprecated in Rceattle and no longer written
           # to `index_data`, so naming it directly fails on a current fit while
           # still needing to be dropped from an older one.
@@ -2213,8 +2229,14 @@ convert_output <- function(
             #   "fore",
             #   NA_character_
             # )
-            label = stringr::str_replace_all(label, "indices", "index")
-          )
+            label = stringr::str_replace_all(label, "indices", "index"),
+            uncertainty = dplyr::if_else(
+              label == "index_predicted",
+              predicted_sd,
+              uncertainty
+            )
+          ) |>
+          dplyr::select(-predicted_sd)
 
         df_index_long[setdiff(tolower(names(out_new)), tolower(names(df_index_long)))] <- NA
         data_list_list[["index_data"]] <- df_index_long
@@ -2235,11 +2257,15 @@ convert_output <- function(
               "fore",
               "time"
             ),
-            catch_h = dat$quantities$catch_hat,
-            # TODO: follow up on this quantity
-            # log_index_hat = dat$quantities$log_index_hat
-            uncertainty_label = "log_sd"
+            # catch_hat is only computed for hindcast years.
+            catch_h = dplyr::if_else(
+              year > dat$data_list$endyr,
+              NA_real_,
+              dat$quantities$catch_hat
+            ),
+            uncertainty_label = "sd"
           ) |>
+          dplyr::filter(year >= 0) |>
           dplyr::rename(
             catch_predicted = catch_h,
             fleet = fleet_name,
@@ -2250,6 +2276,11 @@ convert_output <- function(
             cols = c(catch, catch_predicted),
             names_to = "label",
             values_to = "estimate"
+          ) |>
+          dplyr::mutate(
+            # The log_sd is the observation's error, not the prediction's.
+            uncertainty = dplyr::if_else(label == "catch", uncertainty, NA_real_),
+            uncertainty_label = dplyr::if_else(label == "catch", uncertainty_label, NA_character_)
           ) |>
           dplyr::select(-c(fleet_code, species))
 
@@ -2266,60 +2297,59 @@ convert_output <- function(
         data_list_list[["catch_data"]] <- df_catch
 
         ####### Comp indexing ####
-        df_comp_obs <- dat$data_list$comp_data |>
+        # comp_obs and comp_hat are the observed and predicted proportions, one
+        # row per row of comp_data, each in that row's own age or length bins.
+        # A joint-sex row (Sex = 3) holds the female bins, then the male bins.
+        comp_obs <- dat[["quantities"]][["comp_obs"]]
+        comp_rows <- extract[[1]]$comp_data |>
           dplyr::rename_with(tolower) |>
+          dplyr::select(fleet = fleet_name, sex, age0_length1, year, month) |>
           dplyr::mutate(
-            label = "index_observed"
+            row = dplyr::row_number(),
+            n_bins = dplyr::if_else(
+              age0_length1 == 0,
+              extract[[1]]$nages,
+              extract[[1]]$nlengths
+            )
           )
-
-        indexing_vars_cols <- colnames(df_comp_obs)[!grepl("comp", colnames(df_comp_obs))]
-
-        # `age_hat` holds one row per row of `comp_data`, in the same order, so
-        # it binds column-wise. cross_join() paired every observation with the
-        # whole prediction matrix instead, which is a Cartesian product: on the
-        # GOAatf fixture it returned the 2,478 correct predictions 59 times
-        # over, once per row of comp_data, for 146,202 in all.
-        age_hat <- as.data.frame(dat$quantities$age_hat)
-        names(age_hat) <- paste0("agehat_", seq_len(ncol(age_hat)))
-        df_comp_pred <- dplyr::select(df_comp_obs, dplyr::all_of(indexing_vars_cols)) |>
-          cbind(age_hat) |>
+        df_comp <- data.frame(
+          row = rep(seq_len(nrow(comp_obs)), ncol(comp_obs)),
+          column = rep(seq_len(ncol(comp_obs)), each = nrow(comp_obs)),
+          composition_observed = as.vector(comp_obs),
+          composition_predicted = as.vector(dat[["quantities"]][["comp_hat"]])
+        ) |>
+          dplyr::left_join(comp_rows, by = "row") |>
+          # Columns past a row's own bins are padding.
+          dplyr::filter(
+            column <= n_bins * dplyr::if_else(sex == 3, 2, 1),
+            year >= 0
+          ) |>
+          dplyr::mutate(
+            bin = (column - 1) %% n_bins + 1,
+            # Sex 0 is both sexes combined.
+            sex = dplyr::case_when(
+              sex == 3 & column <= n_bins ~ "female",
+              sex == 3 ~ "male",
+              sex == 1 ~ "female",
+              sex == 2 ~ "male",
+              TRUE ~ NA_character_
+            ),
+            # Age bins start at minage. The fit carries no length bin values,
+            # so a length bin is its ordinal.
+            age = dplyr::if_else(
+              age0_length1 == 0,
+              as.character(extract[[1]]$minage - 1 + bin),
+              NA_character_
+            ),
+            len_bins = dplyr::if_else(age0_length1 == 1, bin, NA_real_),
+            module_name = names(extract)
+          ) |>
           tidyr::pivot_longer(
-            cols = -dplyr::all_of(indexing_vars_cols),
-            names_to = "age",
+            cols = c(composition_observed, composition_predicted),
+            names_to = "label",
             values_to = "estimate"
           ) |>
-          # removes the 0 so assuming there will be no recorded zero catch but Rceattle reports ages up to 117
-          dplyr::filter(estimate != 0) |>
-          dplyr::mutate(
-            label = "composition_predicted",
-            # NOTE: the below age mutate slows down code
-            age = stringr::str_replace(age, "agehat_", "")
-          )
-
-        # Finish adjusting comp_obs
-        # pivot obs data
-        df_comp_obs <- df_comp_obs |>
-          tidyr::pivot_longer(
-            cols = -dplyr::all_of(indexing_vars_cols),
-            names_to = "age",
-            values_to = "estimate"
-          ) |>
-          dplyr::filter(!is.na(estimate)) |>
-          dplyr::mutate(
-            label = "composition_observed",
-            # NOTE: the below age mutate slows down code
-            age = stringr::str_replace(age, "comp_", "")
-          )
-
-        df_comp <- rbind(df_comp_obs, df_comp_pred) |>
-          # Match the index and catch frames: the standard names the fleet
-          # `fleet`, carries no `fleet_name` or `species`, and every row states
-          # which module it came from.
-          dplyr::rename(fleet = fleet_name) |>
-          dplyr::mutate(module_name = names(extract)) |>
-          dplyr::select(-dplyr::any_of("species")) |>
-          # TODO: do I need to filter sample size by <3 for confidentiality or does this not apply?
-          dplyr::select(-c(age0_length1, fleet_code, sample_size))
+          dplyr::select(-c(row, column, n_bins, bin, age0_length1))
 
         df_comp[setdiff(tolower(names(out_new)), tolower(names(df_comp)))] <- NA
         data_list_list[["comp_data"]] <- df_comp
@@ -2333,9 +2363,9 @@ convert_output <- function(
         out_list[[names(extract)]] <- new_df
       } else if (module_name == "quantities") {
         ###### quantities ####
-        # Only selectivity and natural mortality at age for now. Both are
-        # [fleet or species, sex, age, year] arrays. The age dimension is the
-        # bin index, so the age itself is offset by minage.
+        # The at-age quantities are [fleet or species, sex, age, year] arrays.
+        # The age dimension is the bin index, so the age itself is offset by
+        # minage.
         ages <- dat[["data_list"]][["minage"]] - 1 +
           seq_len(dat[["data_list"]][["nages"]])
         nsex <- dat[["data_list"]][["nsex"]]
@@ -2360,20 +2390,32 @@ convert_output <- function(
           quantities_list[["sel_at_age"]] <- df_sel
         }
 
-        if ("M_at_age" %in% names(extract[[1]])) {
-          m_at_age <- extract[[1]][["M_at_age"]][1, seq_len(nsex), seq_along(ages), , drop = FALSE]
-          df_m <- expand.grid(
+        # Natural mortality, numbers and biomass at age share one layout.
+        for (quantity in intersect(c("M_at_age", "N_at_age", "biomass_at_age"), names(extract[[1]]))) {
+          at_age <- extract[[1]][[quantity]][1, seq_len(nsex), seq_along(ages), , drop = FALSE]
+          df_at_age <- expand.grid(
             sex = sex_names,
             age = ages,
-            year = as.numeric(dimnames(m_at_age)[[4]]),
+            year = as.numeric(dimnames(at_age)[[4]]),
             stringsAsFactors = FALSE
           ) |>
             dplyr::mutate(
-              estimate = as.vector(m_at_age),
-              label = "m_at_age"
+              estimate = as.vector(at_age),
+              label = tolower(quantity)
             )
-          df_m[setdiff(tolower(names(out_new)), tolower(names(df_m)))] <- NA
-          quantities_list[["m_at_age"]] <- df_m
+          df_at_age[setdiff(tolower(names(out_new)), tolower(names(df_at_age)))] <- NA
+          quantities_list[[quantity]] <- df_at_age
+        }
+
+        # Fully selected fishing mortality, summed over the fishery fleets.
+        if ("F_spp" %in% names(extract[[1]])) {
+          df_f <- data.frame(
+            year = as.numeric(dimnames(extract[[1]][["F_spp"]])[[2]]),
+            estimate = extract[[1]][["F_spp"]][1, ],
+            label = "f_spp"
+          )
+          df_f[setdiff(tolower(names(out_new)), tolower(names(df_f)))] <- NA
+          quantities_list[["F_spp"]] <- df_f
         }
 
         if (length(quantities_list) > 0) {

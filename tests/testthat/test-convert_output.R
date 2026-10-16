@@ -149,17 +149,8 @@ test_that("convert_output works for Rceattle", {
   # Every row says which module it came from.
   expect_false(any(is.na(from_path[["module_name"]])))
 
-  # Predicted composition binds column-wise to the observations, one row of
-  # age_hat per row of comp_data, so reading age_hat row by row reproduces the
-  # series exactly. A cross join repeats it once per row of comp_data instead.
-  fit <- readRDS(fit_path)
-  age_hat <- as.vector(t(fit[["quantities"]][["age_hat"]]))
-  expect_equal(
-    as.numeric(from_path[from_path[["label"]] == "composition_predicted", ][["estimate"]]),
-    age_hat[age_hat != 0]
-  )
-
   # The index series are the fit's own values, in order.
+  fit <- readRDS(fit_path)
   expect_equal(
     as.numeric(from_path[from_path[["label"]] == "index_predicted", ][["estimate"]]),
     unname(as.numeric(fit[["quantities"]][["index_hat"]]))
@@ -171,6 +162,96 @@ test_that("convert_output works for Rceattle", {
   expect_gt(nrow(biomass), 0)
   expect_false(any(is.na(biomass[["year"]])))
   expect_true(all(is.finite(as.numeric(biomass[["estimate"]]))))
+})
+
+test_that("convert_output places Rceattle composition by sex, age and length", {
+  fit <- readRDS(test_path("fixtures", "rceattle_goa_atf.rds"))
+  out <- convert_output(file = fit, model = "rceattle")
+  comps <- out[grepl("^composition", out[["label"]]), ]
+
+  # GOAatf has 14 joint-sex age comps of 21 ages and 45 joint-sex length comps
+  # of 26 bins, so 2 * (14 * 21 + 45 * 26) values each observed and predicted.
+  expect_equal(sum(comps[["label"]] == "composition_observed"), 2 * (14 * 21 + 45 * 26))
+  expect_equal(sum(comps[["label"]] == "composition_predicted"), 2 * (14 * 21 + 45 * 26))
+
+  # Each comp_data row is a proportion over both sexes, so it sums to 1.
+  totals <- comps |>
+    dplyr::group_by(label, fleet, year, is.na(age)) |>
+    dplyr::summarise(total = sum(estimate), .groups = "drop")
+  expect_equal(totals[["total"]], rep(1, nrow(totals)))
+
+  # Ages run over the model's ages and length bins over its length bins.
+  expect_equal(range(as.numeric(comps[["age"]]), na.rm = TRUE), c(1, 21))
+  expect_equal(range(comps[["length_bins"]], na.rm = TRUE), c(1, 26))
+
+  # The male half of a joint-sex row starts after the female bins: male age 3
+  # is column nages + 3 of comp_hat.
+  first_age_row <- which(fit[["data_list"]][["comp_data"]][["Age0_Length1"]] == 0)[1]
+  male_age_3 <- comps |>
+    dplyr::filter(
+      label == "composition_predicted",
+      fleet == fit[["data_list"]][["comp_data"]][["Fleet_name"]][first_age_row],
+      year == fit[["data_list"]][["comp_data"]][["Year"]][first_age_row],
+      sex == "male",
+      age == "3"
+    )
+  expect_equal(
+    male_age_3[["estimate"]],
+    unname(fit[["quantities"]][["comp_hat"]][first_age_row, 21 + 3])
+  )
+})
+
+test_that("convert_output gives Rceattle index and catch their own errors", {
+  fit <- readRDS(test_path("fixtures", "rceattle_goa_atf.rds"))
+  out <- convert_output(file = fit, model = "rceattle")
+
+  # The predicted index's sd is log_index_hat's, not the observation's.
+  index_predicted <- out[out[["label"]] == "index_predicted", ]
+  expect_equal(
+    index_predicted[["uncertainty"]],
+    unname(fit[["sdrep"]][["sd"]][names(fit[["sdrep"]][["value"]]) == "log_index_hat"])
+  )
+  expect_true(all(out[out[["label"]] == "index_observed", ][["uncertainty_label"]] == "sd"))
+  expect_false("log_index_hat" %in% out[["label"]])
+
+  # The model predicts no catch for projection years and gives it no error.
+  catch_predicted <- out[out[["label"]] == "catch_predicted", ]
+  expect_true(all(is.na(catch_predicted[catch_predicted[["year"]] > 2018, ][["estimate"]])))
+  expect_true(all(is.na(catch_predicted[["uncertainty"]])))
+
+  expect_no_error(plot_index(out, interactive = FALSE))
+})
+
+test_that("convert_output drops Rceattle rows left out of the likelihood", {
+  # A negative year marks a row the model predicts but does not fit.
+  fit <- readRDS(test_path("fixtures", "rceattle_goa_atf.rds"))
+  fit[["data_list"]][["index_data"]][["Year"]][1] <- -1961
+  fit[["data_list"]][["catch_data"]][["Year"]][1] <- -1961
+  fit[["data_list"]][["comp_data"]][["Year"]][1] <- -fit[["data_list"]][["comp_data"]][["Year"]][1]
+  out <- convert_output(file = fit, model = "rceattle")
+
+  expect_true(all(out[["year"]] >= 0, na.rm = TRUE))
+  expect_equal(sum(out[["label"]] == "index_observed"), 16)
+})
+
+test_that("convert_output places Rceattle numbers, biomass and F", {
+  fit <- readRDS(test_path("fixtures", "rceattle_goa_atf.rds"))
+  out <- convert_output(file = fit, model = "rceattle")
+
+  abundance <- out[out[["label"]] == "abundance", ]
+  female_age_5 <- abundance |>
+    dplyr::filter(sex == "female", age == "5", year == 2000)
+  expect_equal(
+    female_age_5[["estimate"]],
+    unname(fit[["quantities"]][["N_at_age"]][1, 1, 5, "2000"])
+  )
+
+  fishing_mortality <- out[out[["label"]] == "fishing_mortality", ]
+  expect_equal(fishing_mortality[["estimate"]], unname(fit[["quantities"]][["F_spp"]][1, ]))
+
+  expect_no_error(plot_abundance_at_age(out, interactive = FALSE))
+  expect_no_error(plot_biomass_at_age(out, interactive = FALSE))
+  expect_no_error(plot_fishing_mortality(out, interactive = FALSE))
 })
 
 test_that("convert_output places Rceattle selectivity and M at age", {
@@ -269,7 +350,8 @@ test_that("convert_output says so when an Rceattle fit carries no sdrep", {
     out <- convert_output(file = no_sd, model = "rceattle"),
     "sdrep"
   )
-  expect_false("biomass" %in% out[["label"]])
+  expect_false("spawning_biomass" %in% out[["label"]])
+  expect_false("recruitment" %in% out[["label"]])
   expect_true("catch" %in% out[["label"]])
 })
 

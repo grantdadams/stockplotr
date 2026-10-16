@@ -33,14 +33,14 @@ stopifnot(
 
 # A saved Rceattle fit is ~50 MB, nearly all of it the TMB objective-function
 # object and the Hessian. Keep only the elements convert_output() reads, which
-# brings the fixture to ~40 KB.
+# brings the fixture to ~100 KB.
 data_list_keep <- c(
-  "styr", "endyr", "projyr", "nspp", "nsex", "minage", "nages", "spnames",
-  "index_data", "catch_data", "comp_data", "fleet_control"
+  "styr", "endyr", "projyr", "nspp", "nsex", "minage", "nages", "nlengths",
+  "spnames", "index_data", "catch_data", "comp_data", "fleet_control"
 )
 quantities_keep <- c(
-  "index_hat", "catch_hat", "age_hat", "log_index_hat", "sel_at_age",
-  "M_at_age"
+  "index_hat", "catch_hat", "comp_obs", "comp_hat", "sel_at_age", "M_at_age",
+  "N_at_age", "biomass_at_age", "F_spp"
 )
 
 fixture <- structure(
