@@ -214,10 +214,25 @@ test_that("convert_output gives Rceattle index and catch their own errors", {
   expect_true(all(out[out[["label"]] == "index_observed", ][["uncertainty_label"]] == "sd"))
   expect_false("log_index_hat" %in% out[["label"]])
 
-  # The model predicts no catch for projection years and gives it no error.
+  # Predicted catch is catch_hat in every year, including the projection, and
+  # does not inherit the observation's error.
   catch_predicted <- out[out[["label"]] == "catch_predicted", ]
-  expect_true(all(is.na(catch_predicted[catch_predicted[["year"]] > 2018, ][["estimate"]])))
+  expect_equal(
+    catch_predicted[["estimate"]],
+    unname(as.numeric(fit[["quantities"]][["catch_hat"]]))
+  )
   expect_true(all(is.na(catch_predicted[["uncertainty"]])))
+
+  # Without a matching log_index_hat the predicted index has no error, rather
+  # than a misaligned one.
+  no_sd <- fit
+  keep <- names(fit[["sdrep"]][["value"]]) != "log_index_hat"
+  no_sd[["sdrep"]][["value"]] <- fit[["sdrep"]][["value"]][keep]
+  no_sd[["sdrep"]][["sd"]] <- fit[["sdrep"]][["sd"]][keep]
+  no_sd_out <- convert_output(file = no_sd, model = "rceattle")
+  expect_true(all(is.na(
+    no_sd_out[no_sd_out[["label"]] == "index_predicted", ][["uncertainty"]]
+  )))
 
   expect_no_error(plot_index(out, interactive = FALSE))
 })

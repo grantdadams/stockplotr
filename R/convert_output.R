@@ -2193,7 +2193,7 @@ convert_output <- function(
           ) |>
           dplyr::mutate(
             # label = "index_observed",
-            # Rceattle's index and catch errors are log-scale sds.
+            # Log_sd is a log-scale sd for a lognormal index or catch.
             uncertainty_label = "sd",
             indices_predicted = dat$quantities$index_hat,
             predicted_sd = log_index_hat_sd
@@ -2242,8 +2242,7 @@ convert_output <- function(
         data_list_list[["index_data"]] <- df_index_long
 
         ####### Catch indexing ####
-        # Extract catch_data and align with log_index_hat and catch_h
-        # Modify sdrep in outlist to include index
+        # Extract catch_data and align with catch_hat
         df_catch <- extract[[1]]$catch_data |>
           # dplyr::filter(!is.na(Catch)) |>
           dplyr::rename_with(tolower) |>
@@ -2257,12 +2256,7 @@ convert_output <- function(
               "fore",
               "time"
             ),
-            # catch_hat is only computed for hindcast years.
-            catch_h = dplyr::if_else(
-              year > dat$data_list$endyr,
-              NA_real_,
-              dat$quantities$catch_hat
-            ),
+            catch_h = dat$quantities$catch_hat,
             uncertainty_label = "sd"
           ) |>
           dplyr::filter(year >= 0) |>
