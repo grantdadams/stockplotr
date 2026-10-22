@@ -51,6 +51,53 @@ test_that("filter_data handles data frames and lists", {
   expect_setequal(unique(filtered_list$group_var), c("model_one", "model_two"))
 })
 
+test_that("filter_data gives log-scale intervals for log_ uncertainty labels", {
+  dat <- tibble::tibble(
+    label = c("index_observed", "index_observed"),
+    estimate = c(100, 2000),
+    module_name = c("INDEX", "INDEX"),
+    year = c(2000, 2001),
+    fleet = c("survey", "survey"),
+    uncertainty = c(0.2, 0.5),
+    uncertainty_label = c("log_sd", "log_sd")
+  )
+
+  filtered <- filter_data(
+    dat = dat,
+    label_name = "index_observed",
+    geom = "line",
+    interactive = FALSE
+  )
+  # 95% interval of a lognormal with meanlog = log(estimate) and
+  # sdlog = uncertainty
+  expect_equal(
+    filtered$estimate_lower,
+    stats::qlnorm(0.025, meanlog = log(c(100, 2000)), sdlog = c(0.2, 0.5)),
+    tolerance = 1e-4
+  )
+  expect_equal(
+    filtered$estimate_upper,
+    stats::qlnorm(0.975, meanlog = log(c(100, 2000)), sdlog = c(0.2, 0.5)),
+    tolerance = 1e-4
+  )
+  # The interval is symmetric on the log scale, not the natural scale
+  expect_equal(
+    log(filtered$estimate_upper) - log(filtered$estimate),
+    log(filtered$estimate) - log(filtered$estimate_lower)
+  )
+
+  # scale_amount scales the interval along with the estimate
+  scaled <- filter_data(
+    dat = dat,
+    label_name = "index_observed",
+    geom = "line",
+    scale_amount = 10,
+    interactive = FALSE
+  )
+  expect_equal(scaled$estimate_lower, filtered$estimate_lower / 10)
+  expect_equal(scaled$estimate_upper, filtered$estimate_upper / 10)
+})
+
 test_that("filter_data uses the first module when selection is empty", {
   testthat::local_mocked_bindings(
     interactive = function() TRUE,

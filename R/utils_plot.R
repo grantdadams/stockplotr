@@ -736,13 +736,19 @@ filter_data <- function(
         model = ifelse(model_label, get_id(dat)[i], "1"), # NA -- changed from NA to 1 for processing reasons, might need to change back if issue
         # calc uncertainty when se
         # TODO: calculate other sources of error to upper and lower (cv,)
+        # A "log_" label (e.g., "log_sd") is a standard deviation on the log
+        # scale, so the 95% interval is symmetric around log(estimate). This
+        # check comes first because "log_sd" and "log_se" also match "sd" and
+        # "se" below.
         estimate_lower = dplyr::case_when(
+          grepl("^log_", tolower(uncertainty_label)) ~ (estimate * exp(-1.96 * uncertainty)) / scale_amount,
           grepl("se", uncertainty_label) ~ estimate - ((1.96 * uncertainty)) / scale_amount,
           grepl("sd", tolower(uncertainty_label)) | grepl("std", tolower(uncertainty_label)) ~ (estimate - uncertainty) / scale_amount,
           grepl("cv", tolower(uncertainty_label)) ~ (estimate - (1.96 * (uncertainty * estimate))) / scale_amount,
           TRUE ~ NA
         ),
         estimate_upper = dplyr::case_when(
+          grepl("^log_", tolower(uncertainty_label)) ~ (estimate * exp(1.96 * uncertainty)) / scale_amount,
           grepl("se", uncertainty_label) ~ (estimate + (1.96 * uncertainty)) / scale_amount,
           grepl("sd", tolower(uncertainty_label)) | grepl("std", tolower(uncertainty_label)) ~ (estimate + uncertainty) / scale_amount,
           grepl("cv", tolower(uncertainty_label)) ~ (estimate + (1.96 * (uncertainty * estimate))) / scale_amount,
