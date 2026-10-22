@@ -12,6 +12,7 @@ plot_index(
   interactive = TRUE,
   module = NULL,
   focus = NULL,
+  log_scale = FALSE,
   make_rda = FALSE,
   figures_dir = getwd(),
   ...
@@ -58,6 +59,11 @@ module_name in the console. @seealso \code{\link[=filter_data]{filter_data()}}}
 
 Default: NULL}
 
+\item{log_scale}{Logical. TRUE/FALSE; plot the y axis on a log scale. The
+axis labels stay in the units of the index.
+
+Default: \code{FALSE}}
+
 \item{make_rda}{Logical. TRUE/FALSE; indicate whether to save the object and
 make an automated caption and alternative text in the form of an \code{rda} object. If TRUE,
 the rda will be exported to the folder indicated in the argument "figures_dir".
@@ -73,7 +79,7 @@ The folder is created within the path if it does not exist.}
 \item{...}{Arguments called from \link[ggplot2]{geom_line} or \link[ggplot2]{geom_point}}
 }
 \value{
-A plot showing the expected and predicted index.
+A plot showing the observed and predicted index.
 }
 \description{
 Plot Index of Abundance
@@ -83,6 +89,19 @@ The input is from an assessment model output file
 translated to a standardized output (\link[stockplotr]{convert_output}).
 There are options to return a \code{ggplot2} object or export an .rda object
 containing associated caption and alternative text for the figure.
+
+Observed values are drawn as points with intervals and predicted values as
+a line. The interval comes from the uncertainty of the observation and is
+calculated by \link[stockplotr]{filter_data}. Its scale follows
+\code{uncertainty_label}. A label that starts with "log_" (e.g., "log_sd") is a
+standard deviation on the log scale, as used by a lognormal likelihood, so
+the 95\% interval is \code{estimate * exp(c(-1.96, 1.96) * uncertainty)}. Other
+labels use the natural-scale rules in \link[stockplotr]{filter_data}.
+Observations without uncertainty have no interval.
+
+For a lognormal likelihood, the interval brackets the median of the fitted
+observation distribution. The line is that median only when the model
+reports the predicted index without a bias adjustment.
 }
 \examples{
 plot_index(

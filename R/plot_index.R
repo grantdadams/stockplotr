@@ -13,12 +13,29 @@
 #' (i.e. select names of fleets to zoom into the plot)
 #'
 #' Default: NULL
-#' @returns A plot showing the expected and predicted index.
+#' @param log_scale Logical. TRUE/FALSE; plot the y axis on a log scale. The
+#' axis labels stay in the units of the index.
+#'
+#' Default: `FALSE`
+#' @returns A plot showing the observed and predicted index.
 #'
 #' @details The input is from an assessment model output file
 #' translated to a standardized output (\link[stockplotr]{convert_output}).
 #' There are options to return a `ggplot2` object or export an .rda object
 #' containing associated caption and alternative text for the figure.
+#'
+#' Observed values are drawn as points with intervals and predicted values as
+#' a line. The interval comes from the uncertainty of the observation and is
+#' calculated by \link[stockplotr]{filter_data}. Its scale follows
+#' `uncertainty_label`. A label that starts with "log_" (e.g., "log_sd") is a
+#' standard deviation on the log scale, as used by a lognormal likelihood, so
+#' the 95% interval is `estimate * exp(c(-1.96, 1.96) * uncertainty)`. Other
+#' labels use the natural-scale rules in \link[stockplotr]{filter_data}.
+#' Observations without uncertainty have no interval.
+#'
+#' For a lognormal likelihood, the interval brackets the median of the fitted
+#' observation distribution. The line is that median only when the model
+#' reports the predicted index without a bias adjustment.
 #'
 #' @seealso [convert_output()], [filter_data()], [process_data()], [plot_obsvpred()], [export_kqs()], [insert_kqs()], [create_rda()]
 #'
@@ -40,6 +57,7 @@ plot_index <- function(
   interactive = TRUE,
   module = NULL,
   focus = NULL,
+  log_scale = FALSE,
   make_rda = FALSE,
   figures_dir = getwd(),
   ...
@@ -57,7 +75,9 @@ plot_index <- function(
   # Filter data
   prepared_data <- filter_data(
     dat,
-    label_name = "index",
+    # Only the observed and predicted index. A looser match also picks up
+    # other index quantities, such as log_index_hat from an Rceattle sdreport.
+    label_name = "index_observed|index_predicted",
     era = NULL,
     geom = "line",
     # ifelse guarantees the code doesn't miss grouping when label has > 1 value
@@ -88,6 +108,9 @@ plot_index <- function(
   if (!is.null(group)) {
     facet <- c(facet, group)
   }
+  # process_data() drops a variable with a single value, e.g., the fleet of a
+  # model with one index, so it can no longer be used to facet
+  facet <- facet[facet %in% colnames(prepared_data)]
   # transform prep data so group_var = label
   # prepared_data <- prepared_data |>
   #   dplyr::mutate(
@@ -124,6 +147,40 @@ plot_index <- function(
       # Combine into "Variable: Value" format
       lapply(names(labels), function(var) paste0(var, ": ", labels[[var]]))
     })
+  }
+
+  # Add intervals to the observed values. The uncertainty describes the
+  # observation error, so predicted values get no interval.
+  observed_data <- prepared_data |>
+    dplyr::filter(
+      grepl("index_observed", label),
+      !is.na(estimate_lower)
+    )
+  if (nrow(observed_data) > 0) {
+    plt <- plt +
+      ggplot2::geom_linerange(
+        data = observed_data,
+        ggplot2::aes(
+          x = year,
+          ymin = estimate_lower,
+          ymax = estimate_upper,
+          color = group_var
+        ),
+        show.legend = FALSE
+      )
+  }
+
+  if (log_scale) {
+    # Remove the blank layer that extends the y axis to 0, which cannot be
+    # shown on a log scale
+    plt$layers <- Filter(
+      function(layer) !inherits(layer$geom, "GeomBlank"),
+      plt$layers
+    )
+    plt <- plt +
+      ggplot2::scale_y_log10(
+        labels = scales::label_comma()
+      )
   }
 
   ### Make RDA ----
