@@ -36,7 +36,7 @@ Set group = "none" to summarize data over all indexing values.
 Default: NULL
 Options: Including, but not limited to: "year", "area", "fleet", "sex", "none", NULL}
 
-\item{facet}{Character vector. Column name or names used for faceting. "fleet" is always added on to any faceting selections
+\item{facet}{Character vector. Column name or names used for faceting. "fleet" is always added on to any faceting selections when there is more than one fleet
 
 Default: NULL
 
@@ -99,15 +99,20 @@ the 95\% interval is \code{estimate * exp(c(-1.96, 1.96) * uncertainty)}. Other
 labels use the natural-scale rules in \link[stockplotr]{filter_data}.
 Observations without uncertainty have no interval.
 
-For a lognormal likelihood, the interval brackets the median of the fitted
-observation distribution. The line is that median only when the model
-reports the predicted index without a bias adjustment.
+With a lognormal likelihood, compare the interval with the median of the
+fitted observation distribution. The line is that median only when the
+model reports the predicted index without a bias adjustment.
 }
 \examples{
 plot_index(
   dat = stockplotr::example_data,
   unit_label = "fish/hr",
   interactive = FALSE
+)
+plot_index(
+  dat = stockplotr::example_data,
+  interactive = FALSE,
+  log_scale = TRUE
 )
 
 }

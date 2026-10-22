@@ -1,7 +1,7 @@
 #' Plot Index of Abundance
 #'
 #' @inheritParams plot_spawning_biomass
-#' @param facet Character vector. Column name or names used for faceting. "fleet" is always added on to any faceting selections
+#' @param facet Character vector. Column name or names used for faceting. "fleet" is always added on to any faceting selections when there is more than one fleet
 #'
 #' Default: NULL
 #'
@@ -33,9 +33,9 @@
 #' labels use the natural-scale rules in \link[stockplotr]{filter_data}.
 #' Observations without uncertainty have no interval.
 #'
-#' For a lognormal likelihood, the interval brackets the median of the fitted
-#' observation distribution. The line is that median only when the model
-#' reports the predicted index without a bias adjustment.
+#' With a lognormal likelihood, compare the interval with the median of the
+#' fitted observation distribution. The line is that median only when the
+#' model reports the predicted index without a bias adjustment.
 #'
 #' @seealso [convert_output()], [filter_data()], [process_data()], [plot_obsvpred()], [export_kqs()], [insert_kqs()], [create_rda()]
 #'
@@ -46,6 +46,11 @@
 #'   dat = stockplotr::example_data,
 #'   unit_label = "fish/hr",
 #'   interactive = FALSE
+#' )
+#' plot_index(
+#'   dat = stockplotr::example_data,
+#'   interactive = FALSE,
+#'   log_scale = TRUE
 #' )
 #'
 plot_index <- function(
@@ -108,9 +113,10 @@ plot_index <- function(
   if (!is.null(group)) {
     facet <- c(facet, group)
   }
-  # process_data() drops a variable with a single value, e.g., the fleet of a
-  # model with one index, so it can no longer be used to facet
-  facet <- facet[facet %in% colnames(prepared_data)]
+  # process_data() drops fleet when there is only one index fleet
+  if ("fleet" %notin% colnames(prepared_data)) {
+    facet <- facet[facet != "fleet"]
+  }
   # transform prep data so group_var = label
   # prepared_data <- prepared_data |>
   #   dplyr::mutate(
@@ -177,10 +183,13 @@ plot_index <- function(
       function(layer) !inherits(layer$geom, "GeomBlank"),
       plt$layers
     )
-    plt <- plt +
-      ggplot2::scale_y_log10(
-        labels = scales::label_comma()
-      )
+    # plot_obsvpred() already sets a y scale, and replacing it is expected
+    plt <- suppressMessages(
+      plt +
+        ggplot2::scale_y_log10(
+          labels = scales::label_comma()
+        )
+    )
   }
 
   ### Make RDA ----
