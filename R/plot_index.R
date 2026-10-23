@@ -13,10 +13,6 @@
 #' (i.e. select names of fleets to zoom into the plot)
 #'
 #' Default: NULL
-#' @param log_scale Logical. TRUE/FALSE; plot the y axis on a log scale. The
-#' axis labels stay in the units of the index.
-#'
-#' Default: `FALSE`
 #' @returns A plot showing the observed and predicted index.
 #'
 #' @details The input is from an assessment model output file
@@ -33,10 +29,6 @@
 #' labels use the natural-scale rules in \link[stockplotr]{filter_data}.
 #' Observations without uncertainty have no interval.
 #'
-#' With a lognormal likelihood, compare the interval with the median of the
-#' fitted observation distribution. The line is that median only when the
-#' model reports the predicted index without a bias adjustment.
-#'
 #' @seealso [convert_output()], [filter_data()], [process_data()], [plot_obsvpred()], [export_kqs()], [insert_kqs()], [create_rda()]
 #'
 #' @export
@@ -46,11 +38,6 @@
 #'   dat = stockplotr::example_data,
 #'   unit_label = "fish/hr",
 #'   interactive = FALSE
-#' )
-#' plot_index(
-#'   dat = stockplotr::example_data,
-#'   interactive = FALSE,
-#'   log_scale = TRUE
 #' )
 #'
 plot_index <- function(
@@ -62,7 +49,6 @@ plot_index <- function(
   interactive = TRUE,
   module = NULL,
   focus = NULL,
-  log_scale = FALSE,
   make_rda = FALSE,
   figures_dir = getwd(),
   ...
@@ -176,29 +162,14 @@ plot_index <- function(
       )
   }
 
-  if (log_scale) {
-    # Remove the blank layer that extends the y axis to 0, which cannot be
-    # shown on a log scale
-    plt$layers <- Filter(
-      function(layer) !inherits(layer$geom, "GeomBlank"),
-      plt$layers
-    )
-    # plot_obsvpred() already sets a y scale, and replacing it is expected
-    plt <- suppressMessages(
-      plt +
-        ggplot2::scale_y_log10(
-          labels = scales::label_comma()
-        )
-    )
-  }
-
   ### Make RDA ----
   if (make_rda) {
     # Obtain relevant key quantities for captions/alt text
     cpue.start.year <- min(prepared_data$year)
     cpue.end.year <- max(prepared_data$year)
-    cpue.min <- min(prepared_data$estimate) |> round(digits = 3)
-    cpue.max <- max(prepared_data$estimate) |> round(digits = 3)
+    # The y axis spans the intervals as well as the points
+    cpue.min <- min(prepared_data$estimate, prepared_data$estimate_lower, na.rm = TRUE) |> round(digits = 3)
+    cpue.max <- max(prepared_data$estimate, prepared_data$estimate_upper, na.rm = TRUE) |> round(digits = 3)
     cpue.units <- ifelse(unit_label == "",
       "an estimated index ratio", # default if empty
       unit_label

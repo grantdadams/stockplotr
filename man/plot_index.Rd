@@ -12,7 +12,6 @@ plot_index(
   interactive = TRUE,
   module = NULL,
   focus = NULL,
-  log_scale = FALSE,
   make_rda = FALSE,
   figures_dir = getwd(),
   ...
@@ -59,11 +58,6 @@ module_name in the console. @seealso \code{\link[=filter_data]{filter_data()}}}
 
 Default: NULL}
 
-\item{log_scale}{Logical. TRUE/FALSE; plot the y axis on a log scale. The
-axis labels stay in the units of the index.
-
-Default: \code{FALSE}}
-
 \item{make_rda}{Logical. TRUE/FALSE; indicate whether to save the object and
 make an automated caption and alternative text in the form of an \code{rda} object. If TRUE,
 the rda will be exported to the folder indicated in the argument "figures_dir".
@@ -98,21 +92,12 @@ standard deviation on the log scale, as used by a lognormal likelihood, so
 the 95\% interval is \code{estimate * exp(c(-1.96, 1.96) * uncertainty)}. Other
 labels use the natural-scale rules in \link[stockplotr]{filter_data}.
 Observations without uncertainty have no interval.
-
-With a lognormal likelihood, compare the interval with the median of the
-fitted observation distribution. The line is that median only when the
-model reports the predicted index without a bias adjustment.
 }
 \examples{
 plot_index(
   dat = stockplotr::example_data,
   unit_label = "fish/hr",
   interactive = FALSE
-)
-plot_index(
-  dat = stockplotr::example_data,
-  interactive = FALSE,
-  log_scale = TRUE
 )
 
 }

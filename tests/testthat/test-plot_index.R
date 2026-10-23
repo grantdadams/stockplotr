@@ -85,13 +85,14 @@ test_that("plot_index plots a single Rceattle index", {
   expect_no_error(ggplot2::ggplot_build(plt))
 })
 
-test_that("plot_index can use a log scale", {
-  plt <- plot_index(make_index_data(), interactive = FALSE, log_scale = TRUE)
-  expect_equal(
-    plt$scales$get_scales("y")$get_transformation()$name,
-    "log-10"
-  )
-  expect_no_warning(ggplot2::ggplot_build(plt))
+test_that("plot_index keeps other facets when there is one index fleet", {
+  one_fleet <- make_index_data() |>
+    dplyr::filter(fleet == "survey_a") |>
+    dplyr::mutate(area = rep(c("north", "south"), 2))
+
+  plt <- plot_index(one_fleet, facet = "area", interactive = FALSE)
+  expect_equal(names(plt$facet$params$facets), "area")
+  expect_no_error(ggplot2::ggplot_build(plt))
 })
 
 # test_that("rda file made when indicated", {
